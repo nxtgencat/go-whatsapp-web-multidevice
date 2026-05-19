@@ -1,86 +1,79 @@
 export default {
-    name: 'SendPresence',
-    data() {
-        return {
-            type: 'available',
-            loading: false,
-        }
+  name: "SendPresence",
+  data() {
+    return { type: "available", loading: false, showModal: false };
+  },
+  methods: {
+    openModal() {
+      this.showModal = true;
     },
-    methods: {
-        openModal() {
-            $('#modalSendPresence').modal({
-                onApprove: function () {
-                    return false;
-                }
-            }).modal('show');
-        },
-        async handleSubmit() {
-            if (this.loading) {
-                return;
-            }
-
-            try {
-                let response = await this.submitApi()
-                showSuccessInfo(response)
-                $('#modalSendPresence').modal('hide');
-            } catch (err) {
-                showErrorInfo(err)
-            }
-        },
-        async submitApi() {
-            this.loading = true;
-            try {
-                let payload = {
-                    type: this.type
-                }
-                let response = await window.http.post(`/send/presence`, payload)
-                return response.data.message;
-            } catch (error) {
-                if (error.response) {
-                    throw new Error(error.response.data.message);
-                }
-                throw new Error(error.message);
-            } finally {
-                this.loading = false;
-            }
-        }
+    closeModal() {
+      this.showModal = false;
     },
-    template: `
-    <div class="blue card" @click="openModal()" style="cursor: pointer">
-        <div class="content">
-            <a class="ui blue right ribbon label">Send</a>
-            <div class="header">Send Presence</div>
-            <div class="description">
-                Set <div class="ui green horizontal label">available</div> or <div class="ui grey horizontal label">unavailable</div>
-            </div>
-        </div>
+    async handleSubmit() {
+      if (this.loading) return;
+      try {
+        let r = await this.submitApi();
+        showSuccessInfo(r);
+        this.closeModal();
+      } catch (err) {
+        showErrorInfo(err);
+      }
+    },
+    async submitApi() {
+      this.loading = true;
+      try {
+        let response = await window.http.post(`/send/presence`, {
+          type: this.type,
+        });
+        return response.data.message;
+      } catch (error) {
+        if (error.response) throw new Error(error.response.data.message);
+        throw new Error(error.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+  },
+  template: `
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-send)">Send</span>
+      <div class="card-title">Send Presence</div>
+      <div class="card-desc">
+        Set
+        <span class="card-tag">available</span>
+        or
+        <span class="card-tag">unavailable</span>
+      </div>
     </div>
-    
-    <!--  Modal SendPresence  -->
-    <div class="ui small modal" id="modalSendPresence">
-        <i class="close icon"></i>
-        <div class="header">
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box">
+          <div class="modal-header">
             Send Presence
-        </div>
-        <div class="content">
-            <form class="ui form">
-                <div class="field">
-                    <label>Presence Status</label>
-                    <select v-model="type" class="ui dropdown">
-                        <option value="available">Available</option>
-                        <option value="unavailable">Unavailable</option>
-                    </select>
-                </div>
-            </form>
-        </div>
-        <div class="actions">
-            <button class="ui approve positive right labeled icon button" 
-                 :class="{'loading': loading, 'disabled': loading}"
-                 @click.prevent="handleSubmit">
-                Send
-                <i class="send icon"></i>
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Presence Status</label>
+              <select v-model="type" class="form-select">
+                <option value="available">Available</option>
+                <option value="unavailable">Unavailable</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button
+              class="btn btn-primary"
+              :class="{'btn-loading': loading}"
+              :disabled="loading"
+              @click.prevent="handleSubmit"
+            >
+              Send
             </button>
+          </div>
         </div>
-    </div>
-    `
-}
+      </div>
+    </teleport>
+  `,
+};

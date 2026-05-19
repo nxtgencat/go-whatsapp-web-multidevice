@@ -1,144 +1,134 @@
 export default {
-    name: 'GroupSetPhoto',
-    data() {
-        return {
-            loading: false,
-            groupId: '',
-            photo: null,
-            photoFile: null,
-            previewUrl: null,
-        }
+  name: "GroupSetPhoto",
+  data() {
+    return {
+      loading: false,
+      groupId: "",
+      photoFile: null,
+      previewUrl: null,
+      showModal: false,
+    };
+  },
+  methods: {
+    openModal() {
+      this.showModal = true;
     },
-    methods: {
-        openModal() {
-            $('#modalGroupSetPhoto').modal({
-                onApprove: function () {
-                    return false;
-                }
-            }).modal('show');
-        },
-        isValidForm() {
-            return this.groupId.trim() !== '';
-        },
-        handleFileChange(event) {
-            const file = event.target.files[0];
-            if (file) {
-                this.photoFile = file;
-                // Create preview
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    this.previewUrl = e.target.result;
-                };
-                reader.readAsDataURL(file);
-            }
-        },
-        handleRemovePhoto() {
-            this.photoFile = null;
-            this.previewUrl = null;
-            // Reset file input
-            const fileInput = document.querySelector('#photoUpload');
-            if (fileInput) {
-                fileInput.value = '';
-            }
-        },
-        async handleSubmit() {
-            if (!this.isValidForm() || this.loading) {
-                return;
-            }
-            try {
-                let response = await this.submitApi()
-                showSuccessInfo(response)
-                $('#modalGroupSetPhoto').modal('hide');
-            } catch (err) {
-                showErrorInfo(err)
-            }
-        },
-        async submitApi() {
-            this.loading = true;
-            try {
-                const formData = new FormData();
-                formData.append('group_id', this.groupId);
-                if (this.photoFile) {
-                    formData.append('photo', this.photoFile);
-                }
-
-                let response = await window.http.post(`/group/photo`, formData, {
-                    headers: {
-                        'Content-Type': 'multipart/form-data'
-                    }
-                })
-                this.handleReset();
-                return response.data.message;
-            } catch (error) {
-                if (error.response) {
-                    throw new Error(error.response.data.message);
-                }
-                throw new Error(error.message);
-            } finally {
-                this.loading = false;
-            }
-        },
-        handleReset() {
-            this.groupId = '';
-            this.photoFile = null;
-            this.previewUrl = null;
-            const fileInput = document.querySelector('#photoUpload');
-            if (fileInput) {
-                fileInput.value = '';
-            }
-        },
+    closeModal() {
+      this.showModal = false;
     },
-    template: `
-    <div class="green card" @click="openModal" style="cursor: pointer">
-        <div class="content">
-            <a class="ui green right ribbon label">Group</a>
-            <div class="header">Set Group Photo</div>
-            <div class="description">
-                Update or remove group profile picture
-            </div>
-        </div>
+    isValidForm() {
+      return this.groupId.trim() !== "";
+    },
+    handleFileChange(event) {
+      const f = event.target.files[0];
+      if (f) {
+        this.photoFile = f;
+        const r = new FileReader();
+        r.onload = (e) => {
+          this.previewUrl = e.target.result;
+        };
+        r.readAsDataURL(f);
+      }
+    },
+    handleRemovePhoto() {
+      this.photoFile = null;
+      this.previewUrl = null;
+      if (this.$refs.photoInput) this.$refs.photoInput.value = "";
+    },
+    async handleSubmit() {
+      if (!this.isValidForm() || this.loading) return;
+      try {
+        let r = await this.submitApi();
+        showSuccessInfo(r);
+        this.closeModal();
+      } catch (err) {
+        showErrorInfo(err);
+      }
+    },
+    async submitApi() {
+      this.loading = true;
+      try {
+        const fd = new FormData();
+        fd.append("group_id", this.groupId);
+        if (this.photoFile) fd.append("photo", this.photoFile);
+        let response = await window.http.post(`/group/photo`, fd);
+        this.handleReset();
+        return response.data.message;
+      } catch (error) {
+        if (error.response) throw new Error(error.response.data.message);
+        throw new Error(error.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+    handleReset() {
+      this.groupId = "";
+      this.photoFile = null;
+      this.previewUrl = null;
+      if (this.$refs.photoInput) this.$refs.photoInput.value = "";
+    },
+  },
+  template: `
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-group)">Group</span>
+      <div class="card-title">Set Group Photo</div>
+      <div class="card-desc">Update or remove group profile picture</div>
     </div>
-    
-    <!--  Modal Group Set Photo  -->
-    <div class="ui small modal" id="modalGroupSetPhoto">
-        <i class="close icon"></i>
-        <div class="header">
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box">
+          <div class="modal-header">
             Set Group Photo
-        </div>
-        <div class="content">
-            <form class="ui form">
-                <div class="field">
-                    <label>Group ID</label>
-                    <input v-model="groupId" type="text"
-                           placeholder="120363024512399999@g.us"
-                           aria-label="Group ID">
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <form @submit.prevent="handleSubmit">
+              <div class="form-group">
+                <label class="form-label">Group ID</label>
+                <input
+                  v-model="groupId"
+                  type="text"
+                  class="form-input"
+                  placeholder="120363024512399999@g.us"
+                  aria-label="Group ID"
+                />
+              </div>
+              <div class="form-group">
+                <input
+                  type="file"
+                  ref="photoInput"
+                  class="hidden"
+                  accept="image/*"
+                  @change="handleFileChange"
+                />
+                <label class="upload-btn" @click="$refs.photoInput.click()">Upload photo</label>
+                <small class="text-xs text-gray-500 block mt-1">
+                  JPEG recommended. Leave empty to remove.
+                </small>
+              </div>
+              <div v-if="previewUrl" class="form-group">
+                <label class="form-label">Preview</label>
+                <div class="flex items-center gap-3">
+                  <img :src="previewUrl" class="w-24 h-24 object-cover border-2 border-gray-900" />
+                  <button type="button" class="btn btn-sm btn-danger" @click="handleRemovePhoto">
+                    Remove
+                  </button>
                 </div>
-                
-                <div class="field">
-                    <label>Group Photo</label>
-                    <input type="file" id="photoUpload" accept="image/*" @change="handleFileChange">
-                    <small class="text">Select a JPEG image for best results. Leave empty to remove current photo.</small>
-                </div>
-                
-                <div class="field" v-if="previewUrl">
-                    <label>Preview</label>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <img :src="previewUrl" alt="Preview" style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px;">
-                        <button class="ui red button" @click="handleRemovePhoto" type="button">
-                            <i class="trash icon"></i> Remove
-                        </button>
-                    </div>
-                </div>
+              </div>
             </form>
-        </div>
-        <div class="actions">
-            <button class="ui approve positive right labeled icon button" 
-                    :class="{'loading': this.loading, 'disabled': !this.isValidForm() || this.loading}"
-                    @click.prevent="handleSubmit" type="button">
-                Update Photo
-                <i class="camera icon"></i>
+          </div>
+          <div class="modal-footer">
+            <button
+              class="btn btn-primary"
+              :class="{'btn-loading': loading}"
+              :disabled="!isValidForm() || loading"
+              @click.prevent="handleSubmit"
+            >
+              Update Photo
             </button>
+          </div>
         </div>
-    </div>
-    `
-} 
+      </div>
+    </teleport>
+  `,
+};

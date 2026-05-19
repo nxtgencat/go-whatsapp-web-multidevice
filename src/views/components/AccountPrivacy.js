@@ -1,58 +1,70 @@
 export default {
-    name: 'AccountPrivacy',
-    data() {
-        return {
-            data_privacy: null
-        }
+  name: "AccountPrivacy",
+  data() {
+    return { data_privacy: null, showModal: false };
+  },
+  methods: {
+    async openModal() {
+      try {
+        await this.submitApi();
+        this.showModal = true;
+        showSuccessInfo("Privacy fetched");
+      } catch (err) {
+        showErrorInfo(err);
+      }
     },
-    methods: {
-        async openModal() {
-            try {
-                await this.submitApi();
-                $('#modalUserPrivacy').modal('show');
-                showSuccessInfo("Privacy fetched")
-            } catch (err) {
-                showErrorInfo(err)
-            }
-        },
-        async submitApi() {
-            try {
-                let response = await window.http.get(`/user/my/privacy`)
-                this.data_privacy = response.data.results;
-            } catch (error) {
-                if (error.response) {
-                    throw new Error(error.response.data.message);
-                }
-                throw new Error(error.message);
-            }
-        },
+    closeModal() {
+      this.showModal = false;
     },
-    template: `
-    <div class="olive card" @click="openModal" style="cursor: pointer">
-        <div class="content">
-        <a class="ui olive right ribbon label">Account</a>
-            <div class="header">My Privacy Setting</div>
-            <div class="description">
-                Get your privacy settings
-            </div>
-        </div>
+    async submitApi() {
+      try {
+        let response = await window.http.get(`/user/my/privacy`);
+        this.data_privacy = response.data.results;
+      } catch (error) {
+        if (error.response) throw new Error(error.response.data.message);
+        throw new Error(error.message);
+      }
+    },
+  },
+  template: `
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-account)">Account</span>
+      <div class="card-title">My Privacy Setting</div>
+      <div class="card-desc">Get your privacy settings</div>
     </div>
-    
-    <!--  Modal UserPrivacy  -->
-    <div class="ui small modal" id="modalUserPrivacy">
-        <i class="close icon"></i>
-        <div class="header">
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box">
+          <div class="modal-header">
             My Privacy
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="data_privacy" class="space-y-3">
+              <div class="flex justify-between border-b border-gray-200 pb-2">
+                <span class="text-sm font-bold">Group Add</span>
+                <span class="text-sm">{{ data_privacy.group_add }}</span>
+              </div>
+              <div class="flex justify-between border-b border-gray-200 pb-2">
+                <span class="text-sm font-bold">Last Seen</span>
+                <span class="text-sm">{{ data_privacy.last_seen }}</span>
+              </div>
+              <div class="flex justify-between border-b border-gray-200 pb-2">
+                <span class="text-sm font-bold">Status</span>
+                <span class="text-sm">{{ data_privacy.status }}</span>
+              </div>
+              <div class="flex justify-between border-b border-gray-200 pb-2">
+                <span class="text-sm font-bold">Profile</span>
+                <span class="text-sm">{{ data_privacy.profile }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm font-bold">Read Receipts</span>
+                <span class="text-sm">{{ data_privacy.read_receipts }}</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="content">
-            <ol v-if="data_privacy != null">
-                <li>Who can add Group : <b>{{ data_privacy.group_add }}</b></li>
-                <li>Who can see my Last Seen : <b>{{ data_privacy.last_seen }}</b></li>
-                <li>Who can see my Status : <b>{{ data_privacy.status }}</b></li>
-                <li>Who can see my Profile : <b>{{ data_privacy.profile }}</b></li>
-                <li>Read Receipts : <b>{{ data_privacy.read_receipts }}</b></li>
-            </ol>
-        </div>
-    </div>
-    `
-}
+      </div>
+    </teleport>
+  `,
+};

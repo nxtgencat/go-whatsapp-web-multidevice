@@ -1,303 +1,278 @@
 import GroupListParticipants from "./GroupListParticipants.js";
 
 export default {
-    name: 'ListGroup',
-    components: { GroupListParticipants },
-    props: ['connected'],
-    data() {
-        return {
-            groups: [],
-            selectedGroupId: null,
-            requestedMembers: [],
-            loadingRequestedMembers: false,
-            processingMember: null,
-        }
+  name: "ListGroup",
+  components: { GroupListParticipants },
+  props: { connected: { default: null } },
+  data() {
+    return {
+      groups: [],
+      showModal: false,
+      loading: false,
+      // Requested Members state
+      showRequestedMembersModal: false,
+      requestedMembers: [],
+      loadingRequestedMembers: false,
+      processingMember: null,
+      selectedGroupJID: null,
+    };
+  },
+  methods: {
+    async openModal() {
+      this.showModal = true;
+      try {
+        this.loading = true;
+        await this.submitApi();
+        showSuccessInfo("Groups fetched");
+      } catch (err) {
+        showErrorInfo(err);
+      } finally {
+        this.loading = false;
+      }
     },
-    computed: {
-        currentUserJID() {
-            // connected can be array of objects with device/id or may be undefined
-            if (!this.connected || this.connected.length === 0) return null;
-            return this.connected[0].jid;
-        }
+    closeModal() {
+      this.showModal = false;
     },
-    methods: {
-        async openModal() {
-            try {
-                this.dtClear();
-                // Reset groups before fetching new data
-                this.groups = [];
-                await this.submitApi();
-                $('#modalGroupList').modal('show');
-                // Wait a bit for modal animation to complete before initializing DataTable
-                await new Promise(resolve => setTimeout(resolve, 100));
-                await this.dtRebuild();
-                showSuccessInfo("Groups fetched")
-            } catch (err) {
-                showErrorInfo(err)
-            }
-        },
-        dtClear() {
-            const table = $('#account_groups_table');
-            if ($.fn.DataTable.isDataTable(table)) {
-                table.DataTable().clear().destroy();
-            }
-        },
-        async dtRebuild() {
-            // Wait for Vue to render the new data
-            await this.$nextTick();
-            // Additional delay to ensure DOM is fully updated after Vue render
-            await new Promise(resolve => setTimeout(resolve, 100));
-            const table = $('#account_groups_table');
-            if ($.fn.DataTable.isDataTable(table)) {
-                table.DataTable().destroy();
-            }
-            table.DataTable({
-                pageLength: 100,
-            });
-        },
-        async handleLeaveGroup(group_id) {
-            try {
-                const ok = confirm("Are you sure to leave this group?");
-                if (!ok) return;
-
-                await this.leaveGroupApi(group_id);
-                this.dtClear()
-                await this.submitApi();
-                this.dtRebuild()
-                showSuccessInfo("Group left")
-            } catch (err) {
-                showErrorInfo(err)
-            }
-        },
-        async leaveGroupApi(group_id) {
-            try {
-                let payload = new FormData();
-                payload.append("group_id", group_id)
-                await window.http.post(`/group/leave`, payload)
-            } catch (error) {
-                if (error.response) {
-                    throw new Error(error.response.data.message);
-                }
-                throw new Error(error.message);
-
-            }
-        },
-        async submitApi() {
-            try {
-                let response = await window.http.get(`/user/my/groups`)
-                // Ensure groups is always an array, even if null/undefined
-                this.groups = response.data.results.data || [];
-            } catch (error) {
-                if (error.response) {
-                    throw new Error(error.response.data.message);
-                }
-                throw new Error(error.message);
-            }
-        },
-        formatDate: function (value) {
-            if (!value) return ''
-            return moment(value).format('LLL');
-        },
-        isAdmin(group) {
-            // Check if current user is the owner
-            const owner = group.OwnerJID.split('@')[0];
-            if (owner === this.currentUserJID) {
-                return true;
-            }
-            
-            // Check if current user is an admin in participants
-            const participant = group.Participants.find(p => p.PhoneNumber === this.currentUserJID);
-            return participant && participant.IsAdmin;
-        },
-        async handleSeeRequestedMember(group_id) {
-            this.selectedGroupId = group_id;
-            this.loadingRequestedMembers = true;
-            this.requestedMembers = [];
-            
-            try {
-                const response = await window.http.get(`/group/participant-requests?group_id=${group_id}`);
-                this.requestedMembers = response.data.results || [];
-                this.loadingRequestedMembers = false;
-                $('#modalRequestedMembers').modal('show');
-            } catch (error) {
-                this.loadingRequestedMembers = false;
-                let errorMessage = "Failed to fetch requested members";
-                if (error.response) {
-                    errorMessage = error.response.data.message || errorMessage;
-                }
-                showErrorInfo(errorMessage);
-            }
-        },
-        async handleSeeParticipants(group) {
-            if (!group || !group.JID) return;
-
-            this.selectedGroupId = group.JID;
-            $('#modalGroupList').modal('hide');
-
-            try {
-                await this.$refs.participantsModal.open(group);
-            } catch (error) {
-                const errorMessage = error?.message || 'Failed to fetch participants';
-                showErrorInfo(errorMessage);
-                $('#modalGroupList').modal('show');
-            }
-        },
-        handleExportParticipants(group) {
-            if (!group || !group.JID) return;
-
-            const baseURL = (window.http && window.http.defaults && window.http.defaults.baseURL) ? window.http.defaults.baseURL : '';
-            const exportUrl = `${baseURL}/group/participants/export?group_id=${encodeURIComponent(group.JID)}`;
-            window.open(exportUrl, '_blank');
-        },
-        formatJID(jid) {
-            return jid ? jid.split('@')[0] : '';
-        },
-        closeRequestedMembersModal() {
-            $('#modalRequestedMembers').modal('hide');
-            // open modal again
-            this.openModal();
-        },
-        handleParticipantsClosed() {
-            $('#modalGroupList').modal('show');
-        },
-        async handleProcessRequest(member, action) {
-            if (!this.selectedGroupId || !member) return;
-
-            const actionText = action === 'approve' ? 'approve' : 'reject';
-            const confirmMsg = `Are you sure you want to ${actionText} this member request?`;
-            const ok = confirm(confirmMsg);
-            if (!ok) return;
-
-            try {
-                this.processingMember = member.jid;
-
-                const payload = {
-                    group_id: this.selectedGroupId,
-                    participants: [this.formatJID(member.jid)]
-                };
-
-                await window.http.post(`/group/participant-requests/${action}`, payload);
-
-                // Remove the processed member from the list
-                this.requestedMembers = this.requestedMembers.filter(m => m.jid !== member.jid);
-
-                showSuccessInfo(`Member request ${actionText}d`);
-                this.processingMember = null;
-            } catch (error) {
-                this.processingMember = null;
-                let errorMessage = `Failed to ${actionText} member request`;
-                if (error.response) {
-                    errorMessage = error.response.data.message || errorMessage;
-                }
-                showErrorInfo(errorMessage);
-            }
-        }
+    async submitApi() {
+      try {
+        let response = await window.http.get(`/group`);
+        this.groups = response.data.results.data;
+      } catch (error) {
+        if (error.response) throw new Error(error.response.data.message);
+        throw new Error(error.message);
+      }
     },
-    template: `
-    <div class="green card" @click="openModal" style="cursor: pointer">
-        <div class="content">
-            <a class="ui green right ribbon label">Group</a>
-            <div class="header">List Groups</div>
-            <div class="description">
-                Display all your groups
-            </div>
-        </div>
+    async handleLeaveGroup(group_id) {
+      if (!confirm("Are you sure to leave this group?")) return;
+      try {
+        await window.http.post(`/group/leave`, { group_id });
+        await this.submitApi();
+        showSuccessInfo("Success leave group");
+      } catch (err) {
+        showErrorInfo(err);
+      }
+    },
+    async showParticipants(group) {
+      try {
+        await this.$refs.participantsModal.open(group);
+      } catch (err) {
+        showErrorInfo(err);
+      }
+    },
+    handleExportParticipants(group) {
+      if (!group || !group.JID) return;
+      const baseURL =
+        window.http && window.http.defaults && window.http.defaults.baseURL
+          ? window.http.defaults.baseURL
+          : "";
+      const exportUrl = `${baseURL}/group/participants/export?group_id=${encodeURIComponent(group.JID)}`;
+      window.open(exportUrl, "_blank");
+    },
+    isAdmin(group) {
+      if (!group || !group.Participants) return false;
+      return group.Participants.some(
+        (p) => (p.is_admin || p.is_super_admin) && p.jid === group.OwnerJID,
+      );
+    },
+    async handleSeeRequestedMember(group_id) {
+      this.selectedGroupJID = group_id;
+      this.loadingRequestedMembers = true;
+      this.requestedMembers = [];
+      this.showRequestedMembersModal = true;
+
+      try {
+        const response = await window.http.get(
+          `/group/participant-requests?group_id=${group_id}`,
+        );
+        this.requestedMembers = response.data.results || [];
+      } catch (error) {
+        let errorMessage = "Failed to fetch requested members";
+        if (error.response) {
+          errorMessage = error.response.data.message || errorMessage;
+        }
+        showErrorInfo(errorMessage);
+      } finally {
+        this.loadingRequestedMembers = false;
+      }
+    },
+    closeRequestedMembersModal() {
+      this.showRequestedMembersModal = false;
+    },
+    async handleProcessRequest(member, action) {
+      if (!this.selectedGroupJID || !member) return;
+
+      const actionText = action === "approve" ? "approve" : "reject";
+      const ok = confirm(
+        `Are you sure you want to ${actionText} this member request?`,
+      );
+      if (!ok) return;
+
+      try {
+        this.processingMember = member.jid;
+
+        const payload = {
+          group_id: this.selectedGroupJID,
+          participants: [this.formatJID(member.jid)],
+        };
+
+        await window.http.post(
+          `/group/participant-requests/${action}`,
+          payload,
+        );
+
+        // Remove the processed member from the list
+        this.requestedMembers = this.requestedMembers.filter(
+          (m) => m.jid !== member.jid,
+        );
+
+        showSuccessInfo(`Member request ${actionText}d`);
+      } catch (error) {
+        let errorMessage = `Failed to ${actionText} member request`;
+        if (error.response) {
+          errorMessage = error.response.data.message || errorMessage;
+        }
+        showErrorInfo(errorMessage);
+      } finally {
+        this.processingMember = null;
+      }
+    },
+    formatJID(jid) {
+      if (!jid) return "";
+      return jid.split("@")[0];
+    },
+    formatDate(value) {
+      if (!value) return "";
+      if (isNaN(value)) return "Invalid date";
+      return new Date(value * 1000).toLocaleString();
+    },
+  },
+  template: `
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-group)">Group</span>
+      <div class="card-title">List Groups</div>
+      <div class="card-desc">Display all your connected groups</div>
     </div>
-    
-    <!--  Modal AccountGroup  -->
-    <div class="ui large modal" id="modalGroupList">
-        <i class="close icon"></i>
-        <div class="header">
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box large">
+          <div class="modal-header">
             My Group List
-        </div>
-        <div class="content">
-            <table class="ui celled table" id="account_groups_table">
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="loading" class="loader-center"><div class="loader"></div></div>
+            <div v-else-if="!groups.length" class="msg-box info">No groups found.</div>
+            <div v-else class="overflow-x-auto">
+              <table class="data-table">
                 <thead>
-                <tr>
+                  <tr>
                     <th>Group ID</th>
                     <th>Name</th>
                     <th>Participants</th>
                     <th>Created At</th>
-                    <th>Action</th>
-                </tr>
+                    <th>Actions</th>
+                  </tr>
                 </thead>
                 <tbody>
-                <tr v-for="g in groups" :key="g.JID">
-                    <td>{{ g.JID.split('@')[0] }}</td>
-                    <td>{{ g.Name }}</td>
-                    <td>{{ g.Participants.length }}</td>
-                    <td>{{ formatDate(g.GroupCreated) }}</td>
+                  <tr v-for="g in groups" :key="g.JID">
+                    <td class="text-xs font-mono">{{ formatJID(g.JID) }}</td>
+                    <td>{{ g.Name || 'N/A' }}</td>
+                    <td class="text-sm">{{ g.Participants ? g.Participants.length : 0 }}</td>
+                    <td class="text-xs">{{ formatDate(g.GroupCreated) }}</td>
                     <td>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <button class="ui blue tiny button" @click="handleSeeParticipants(g)">Participants</button>
-                            <button class="ui grey tiny button" @click="handleExportParticipants(g)">Export CSV</button>
-                            <button v-if="isAdmin(g)" class="ui green tiny button" @click="handleSeeRequestedMember(g.JID)">Requested Members</button>
-                            <button class="ui red tiny button" @click="handleLeaveGroup(g.JID)">Leave</button>
-                        </div>
+                      <div class="flex gap-2 flex-wrap">
+                        <button class="btn btn-sm btn-ghost" @click="showParticipants(g)">
+                          Members
+                        </button>
+                        <button class="btn btn-sm btn-ghost" @click="handleExportParticipants(g)">
+                          Export CSV
+                        </button>
+                        <button
+                          v-if="isAdmin(g)"
+                          class="btn btn-sm btn-primary"
+                          @click="handleSeeRequestedMember(g.JID)"
+                        >
+                          Requested Members
+                        </button>
+                        <button class="btn btn-sm btn-danger" @click="handleLeaveGroup(g.JID)">
+                          Leave
+                        </button>
+                      </div>
                     </td>
-                </tr>
+                  </tr>
                 </tbody>
-            </table>
-        </div>
-    </div>
-
-    <group-list-participants ref="participantsModal" @closed="handleParticipantsClosed"></group-list-participants>
-
-    <!-- Requested Members Modal -->
-    <div class="ui modal" id="modalRequestedMembers">
-        <i class="close icon"></i>
-        <div class="header">
-            Requested Group Members
-        </div>
-        <div class="content">
-            <div v-if="loadingRequestedMembers" class="ui active centered inline loader"></div>
-            
-            <div v-else-if="requestedMembers.length === 0" class="ui info message">
-                <div class="header">No Requested Members</div>
-                <p>There are no pending member requests for this group.</p>
+              </table>
             </div>
-            
-            <table v-else class="ui celled table">
+          </div>
+        </div>
+      </div>
+      <GroupListParticipants ref="participantsModal" />
+
+      <!-- Requested Members Modal -->
+      <div v-if="showRequestedMembersModal" class="modal-overlay" @click.self="closeRequestedMembersModal">
+        <div class="modal-box large">
+          <div class="modal-header">
+            Requested Group Members
+            <button class="modal-close" @click="closeRequestedMembersModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="loadingRequestedMembers" class="loader-center"><div class="loader"></div></div>
+
+            <div v-else-if="requestedMembers.length === 0" class="msg-box info">
+              <div class="msg-title">No Requested Members</div>
+              <p class="text-sm">There are no pending member requests for this group.</p>
+            </div>
+
+            <div v-else class="overflow-x-auto">
+              <table class="data-table">
                 <thead>
-                    <tr>
-                        <th>User</th>
-                        <th>Phone Number</th>
-                        <th>Request Time</th>
-                        <th>Action</th>
-                    </tr>
+                  <tr>
+                    <th>User</th>
+                    <th>Phone Number</th>
+                    <th>Request Time</th>
+                    <th>Action</th>
+                  </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="member in requestedMembers" :key="member.jid">
-                        <td>
-                            <div class="header">{{ formatJID(member.jid) }}</div>
-                            <div v-if="member.display_name" class="description">{{ member.display_name }}</div>
-                        </td>
-                        <td>{{ member.phone_number || formatJID(member.jid) }}</td>
-                        <td>{{ formatDate(member.requested_at) }}</td>
-                        <td>
-                            <div class="ui mini buttons">
-                                <button class="ui green button" 
-                                        @click="handleProcessRequest(member, 'approve')"
-                                        :disabled="processingMember === member.jid">
-                                    <i v-if="processingMember === member.jid" class="spinner loading icon"></i>
-                                    Approve
-                                </button>
-                                <div class="or"></div>
-                                <button class="ui red button" 
-                                        @click="handleProcessRequest(member, 'reject')"
-                                        :disabled="processingMember === member.jid">
-                                    <i v-if="processingMember === member.jid" class="spinner loading icon"></i>
-                                    Reject
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
+                  <tr v-for="member in requestedMembers" :key="member.jid">
+                    <td>
+                      <div class="font-bold text-sm">{{ formatJID(member.jid) }}</div>
+                      <div v-if="member.display_name" class="text-xs text-gray-500">
+                        {{ member.display_name }}
+                      </div>
+                    </td>
+                    <td class="text-xs">{{ member.phone_number || formatJID(member.jid) }}</td>
+                    <td class="text-xs">{{ formatDate(member.requested_at) }}</td>
+                    <td>
+                      <div class="flex gap-2">
+                        <button
+                          class="btn btn-sm btn-primary"
+                          @click="handleProcessRequest(member, 'approve')"
+                          :disabled="processingMember === member.jid"
+                          :class="{'btn-loading': processingMember === member.jid}"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          class="btn btn-sm btn-danger"
+                          @click="handleProcessRequest(member, 'reject')"
+                          :disabled="processingMember === member.jid"
+                          :class="{'btn-loading': processingMember === member.jid}"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 </tbody>
-            </table>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" @click="closeRequestedMembersModal">Close</button>
+          </div>
         </div>
-        <div class="actions">
-            <div class="ui button" @click="closeRequestedMembersModal">Close</div>
-        </div>
-    </div>
-    `
-}
+      </div>
+    </teleport>
+  `,
+};

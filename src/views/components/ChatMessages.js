@@ -13,10 +13,11 @@ export default {
       currentPage: 1,
       pageSize: 20,
       totalMessages: 0,
-      // Media download tracking
-      downloadedMedia: {}, // messageId -> { file_path, media_type, file_size, status }
-      downloadingMedia: new Set(), // Set of messageIds currently downloading
-      mediaDownloadErrors: {}, // messageId -> error message
+      showModal: false,
+      showFilters: false,
+      downloadedMedia: {},
+      downloadingMedia: new Set(),
+      mediaDownloadErrors: {},
       maxConcurrentDownloads: 3,
       currentDownloads: 0,
     };
@@ -36,74 +37,43 @@ export default {
       return this.jid.trim().length > 0;
     },
     openModal() {
-      // Check if there's a pre-selected JID from chat list
       const selectedJid = localStorage.getItem("selectedChatJid");
       if (selectedJid) {
         this.jid = selectedJid;
-        localStorage.removeItem("selectedChatJid"); // Clean up
-
+        localStorage.removeItem("selectedChatJid");
         this.loadMessages();
       }
-
-      $("#modalChatMessages")
-        .modal({
-          onShow: function () {
-            // Initialize accordion after modal is shown
-            setTimeout(() => {
-              $("#modalChatMessages .ui.accordion").accordion();
-            }, 100);
-          },
-        })
-        .modal("show");
+      this.showModal = true;
+    },
+    closeModal() {
+      this.showModal = false;
     },
     async loadMessages() {
       if (!this.isValidForm()) {
         showErrorInfo("Please enter a valid JID");
         return;
       }
-
       this.loading = true;
       try {
         const params = new URLSearchParams({
           offset: (this.currentPage - 1) * this.pageSize,
           limit: this.pageSize,
         });
-
-        if (this.searchQuery.trim()) {
-          params.append("search", this.searchQuery);
-        }
-
-        if (this.startTime) {
-          params.append("start_time", this.startTime);
-        }
-
-        if (this.endTime) {
-          params.append("end_time", this.endTime);
-        }
-
-        if (this.isFromMe !== "") {
-          params.append("is_from_me", this.isFromMe);
-        }
-
-        if (this.onlyMedia) {
-          params.append("media_only", "true");
-        }
-
+        if (this.searchQuery.trim()) params.append("search", this.searchQuery);
+        if (this.startTime) params.append("start_time", this.startTime);
+        if (this.endTime) params.append("end_time", this.endTime);
+        if (this.isFromMe !== "") params.append("is_from_me", this.isFromMe);
+        if (this.onlyMedia) params.append("media_only", "true");
         const response = await window.http.get(
-          `/chat/${this.formattedJid}/messages?${params}`
+          `/chat/${this.formattedJid}/messages?${params}`,
         );
         this.messages = response.data.results?.data || [];
         this.totalMessages = response.data.results?.pagination?.total || 0;
-
-        if (this.messages.length === 0) {
-          showErrorInfo("No messages found for the specified criteria");
-        } else {
-          // Auto-download media for loaded messages
-          this.downloadAllMediaInMessages();
-        }
+        if (this.messages.length === 0) showErrorInfo("No messages found");
+        else this.downloadAllMediaInMessages();
       } catch (error) {
         showErrorInfo(
-          error.response?.data?.message || "Failed to load messages"
+          error.response?.data?.message || "Failed to load messages",
         );
       } finally {
         this.loading = false;
@@ -135,483 +105,382 @@ export default {
       this.onlyMedia = false;
       this.currentPage = 1;
       this.totalMessages = 0;
-      // Clear media download state
       this.downloadedMedia = {};
       this.downloadingMedia.clear();
       this.mediaDownloadErrors = {};
       this.currentDownloads = 0;
     },
-    formatTimestamp(timestamp) {
-      if (!timestamp) return "N/A";
-      return moment(timestamp).format("MMM DD, YYYY HH:mm:ss");
+    formatTimestamp(ts) {
+      if (!ts) return "N/A";
+      try {
+        return new Date(ts).toLocaleString();
+      } catch {
+        return "N/A";
+      }
     },
-    formatMessageType(message) {
-      if (message.media_type) return message.media_type.toUpperCase();
-      if (message.message_type) return message.message_type.toUpperCase();
+    formatMessageType(m) {
+      if (m.media_type) return m.media_type.toUpperCase();
+      if (m.message_type) return m.message_type.toUpperCase();
       return "TEXT";
     },
-    formatSender(message) {
-      if (message.is_from_me) return "Me";
-      return message.push_name || message.sender_jid || "Unknown";
+    formatSender(m) {
+      if (m.is_from_me) return "Me";
+      return m.push_name || m.sender_jid || "Unknown";
     },
-    getMessageContent(message) {
-      if (message.content) return message.content;
-      if (message.text) return message.text;
-      if (message.caption) return message.caption;
-      if (message.media_type) return `[${message.media_type.toUpperCase()}]`;
+    getMessageContent(m) {
+      if (m.content) return m.content;
+      if (m.text) return m.text;
+      if (m.caption) return m.caption;
+      if (m.media_type) return `[${m.media_type.toUpperCase()}]`;
       return "[No content]";
     },
     getMediaDisplay(message) {
-      if (!message.media_type || !message.url || !message.id) {
-        return null;
-      }
-
-      const messageId = message.id;
-      const downloadedInfo = this.downloadedMedia[messageId];
-      const isDownloaded = this.isMediaDownloaded(messageId);
-      const isDownloading = this.isMediaDownloading(messageId);
-      const hasError = this.hasMediaDownloadError(messageId);
-
-      // Show loading state
-      if (isDownloading) {
+      if (!message.media_type || !message.url || !message.id) return null;
+      const mid = message.id;
+      const info = this.downloadedMedia[mid];
+      if (this.isMediaDownloading(mid)) return { type: "loading" };
+      if (this.hasMediaDownloadError(mid))
+        return { type: "error", messageId: mid };
+      if (this.isMediaDownloaded(mid) && info) {
+        const fp = info.file_path;
+        const mt = info.media_type;
+        const fn = info.filename;
+        const fs = info.file_size;
         return {
-          type: 'loading',
-          content: `<div class="ui active mini inline loader"></div> Downloading ${message.media_type}...`
+          type: mt.toLowerCase(),
+          filePath: fp,
+          filename: fn,
+          fileSize: fs,
         };
       }
-
-      // Show error state with retry option
-      if (hasError) {
-        return {
-          type: 'error',
-          content: `<div class="ui red message">
-            <i class="exclamation triangle icon"></i>
-            Failed to download ${message.media_type}
-            <span class="ui mini button" style="cursor: pointer; margin-left: 10px;" 
-                  onclick="document.dispatchEvent(new CustomEvent('retryMediaDownload', {detail: '${messageId}'}))">
-              <i class="redo icon"></i> Retry
-            </span>
-          </div>`
-        };
-      }
-
-      // Show downloaded media
-      if (isDownloaded && downloadedInfo) {
-        const filePath = downloadedInfo.file_path;
-        const mediaType = downloadedInfo.media_type;
-        const filename = downloadedInfo.filename;
-        const fileSize = downloadedInfo.file_size;
-
-        switch (mediaType.toLowerCase()) {
-          case 'image':
-            return {
-              type: 'image',
-              content: `<div class="ui fluid image">
-                <img src="${filePath}" alt="${filename}" style="max-width: 300px; max-height: 300px; border-radius: 4px;" 
-                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                <div style="display: none;" class="ui placeholder segment">
-                  <div class="ui icon header">
-                    <i class="image outline icon"></i>
-                    Image not available
-                  </div>
-                </div>
-              </div>`
-            };
-
-          case 'video':
-            return {
-              type: 'video',
-              content: `<div class="ui fluid">
-                <video controls style="max-width: 300px; max-height: 300px; border-radius: 4px;" preload="metadata">
-                  <source src="${filePath}" type="video/mp4">
-                  <source src="${filePath}" type="video/webm">
-                  <source src="${filePath}" type="video/ogg">
-                  Your browser does not support the video tag.
-                </video>
-              </div>`
-            };
-
-          case 'audio':
-            return {
-              type: 'audio',
-              content: `<div class="ui fluid">
-                <audio controls style="width: 100%; max-width: 300px;">
-                  <source src="${filePath}" type="audio/mpeg">
-                  <source src="${filePath}" type="audio/ogg">
-                  <source src="${filePath}" type="audio/wav">
-                  Your browser does not support the audio tag.
-                </audio>
-              </div>`
-            };
-
-          case 'document':
-            const sizeText = fileSize ? `(${Math.round(fileSize / 1024)} KB)` : '';
-            return {
-              type: 'document',
-              content: `<div class="ui labeled button">
-                <a href="${filePath}" download="${filename}" class="ui button">
-                  <i class="download icon"></i>
-                  ${filename} ${sizeText}
-                </a>
-                <div class="ui basic left pointing label">
-                  Document
-                </div>
-              </div>`
-            };
-
-          case 'sticker':
-            return {
-              type: 'sticker',
-              content: `<div class="ui">
-                <img src="${filePath}" alt="Sticker" style="max-width: 150px; max-height: 150px; border-radius: 4px;" 
-                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                <div style="display: none;" class="ui placeholder segment">
-                  <div class="ui icon header">
-                    <i class="smile outline icon"></i>
-                    Sticker not available
-                  </div>
-                </div>
-              </div>`
-            };
-
-          default:
-            return {
-              type: 'unknown',
-              content: `<div class="ui message">
-                <i class="file icon"></i>
-                Unknown media type: ${mediaType}
-              </div>`
-            };
-        }
-      }
-
-      // Default: show media available label
-      return {
-        type: 'available',
-        content: `<div class="ui tiny blue label">
-          <i class="linkify icon"></i>
-          ${message.media_type.toUpperCase()} Available
-        </div>`
-      };
+      return { type: "available", mediaType: message.media_type };
     },
-    getMessageStyle(message) {
-      const baseStyle = {
-        padding: "1em",
-        margin: "0.5em 0",
-      };
-
-      if (message.is_from_me) {
-        return {
-          ...baseStyle,
-          borderLeft: "4px solid #2185d0",
-          backgroundColor: "#f8f9fa",
-        };
-      } else {
-        return {
-          ...baseStyle,
-          borderLeft: "4px solid #767676",
-        };
-      }
+    isMediaDownloaded(mid) {
+      return this.downloadedMedia[mid]?.status === "completed";
     },
-    // Media download methods
-    isMediaDownloaded(messageId) {
-      return this.downloadedMedia[messageId] && this.downloadedMedia[messageId].status === 'completed';
+    isMediaDownloading(mid) {
+      return this.downloadingMedia.has(mid);
     },
-    isMediaDownloading(messageId) {
-      return this.downloadingMedia.has(messageId);
-    },
-    hasMediaDownloadError(messageId) {
-      return !!this.mediaDownloadErrors[messageId];
+    hasMediaDownloadError(mid) {
+      return !!this.mediaDownloadErrors[mid];
     },
     async downloadMediaForMessage(message) {
-      if (!message.media_type || !message.url || !message.id) {
-        return;
-      }
-
-      const messageId = message.id;
-      
-      // Skip if already downloaded or downloading
-      if (this.isMediaDownloaded(messageId) || this.isMediaDownloading(messageId)) {
-        return;
-      }
-
-      // Check concurrent download limit
-      if (this.currentDownloads >= this.maxConcurrentDownloads) {
-        return;
-      }
-
+      if (!message.media_type || !message.url || !message.id) return;
+      const mid = message.id;
+      if (this.isMediaDownloaded(mid) || this.isMediaDownloading(mid)) return;
+      if (this.currentDownloads >= this.maxConcurrentDownloads) return;
       try {
-        this.downloadingMedia.add(messageId);
+        this.downloadingMedia.add(mid);
         this.currentDownloads++;
-        
-        // Clear any previous error
-        if (this.mediaDownloadErrors[messageId]) {
-          delete this.mediaDownloadErrors[messageId];
-        }
-
+        if (this.mediaDownloadErrors[mid]) delete this.mediaDownloadErrors[mid];
         const response = await window.http.get(
-          `/message/${messageId}/download?phone=${this.formattedJid}`
+          `/message/${mid}/download?phone=${this.formattedJid}`,
         );
-
-        if (response.data && response.data.results) {
-          this.downloadedMedia[messageId] = {
+        if (response.data?.results) {
+          this.downloadedMedia[mid] = {
             file_path: response.data.results.file_path,
             media_type: response.data.results.media_type,
             file_size: response.data.results.file_size,
             filename: response.data.results.filename,
-            status: 'completed'
+            status: "completed",
           };
         }
       } catch (error) {
-        console.error(`Failed to download media for message ${messageId}:`, error);
-        this.mediaDownloadErrors[messageId] = error.response?.data?.message || 'Download failed';
+        console.error(`Download failed for ${mid}:`, error);
+        this.mediaDownloadErrors[mid] =
+          error.response?.data?.message || "Download failed";
       } finally {
-        this.downloadingMedia.delete(messageId);
+        this.downloadingMedia.delete(mid);
         this.currentDownloads--;
       }
     },
-    async retryMediaDownload(messageId) {
-      const message = this.messages.find(m => m.id === messageId);
-      if (message) {
-        // Clear the error first
-        delete this.mediaDownloadErrors[messageId];
-        await this.downloadMediaForMessage(message);
+    async retryMediaDownload(mid) {
+      const m = this.messages.find((x) => x.id === mid);
+      if (m) {
+        delete this.mediaDownloadErrors[mid];
+        await this.downloadMediaForMessage(m);
       }
     },
     async downloadAllMediaInMessages() {
-      const mediaMessages = this.messages.filter(message =>
-        message.media_type && message.url && message.id &&
-        !this.isMediaDownloaded(message.id) && !this.isMediaDownloading(message.id)
+      const queue = this.messages.filter(
+        (m) =>
+          m.media_type &&
+          m.url &&
+          m.id &&
+          !this.isMediaDownloaded(m.id) &&
+          !this.isMediaDownloading(m.id),
       );
-
-      if (mediaMessages.length === 0) {
-        return;
-      }
-
-      // Download in batches to respect concurrency limit
-      const downloadQueue = [...mediaMessages];
-
-      const processQueue = async () => {
-        while (downloadQueue.length > 0 && this.currentDownloads < this.maxConcurrentDownloads) {
-          const message = downloadQueue.shift();
-          if (message) {
-            await this.downloadMediaForMessage(message);
-            // Small delay to prevent overwhelming the server
-            await new Promise(resolve => setTimeout(resolve, 100));
+      if (!queue.length) return;
+      const process = async () => {
+        while (
+          queue.length > 0 &&
+          this.currentDownloads < this.maxConcurrentDownloads
+        ) {
+          const m = queue.shift();
+          if (m) {
+            await this.downloadMediaForMessage(m);
+            await new Promise((r) => setTimeout(r, 100));
           }
         }
-
-        // If there are still items in queue and we can download more, continue
-        if (downloadQueue.length > 0 && this.currentDownloads < this.maxConcurrentDownloads) {
-          setTimeout(processQueue, 500); // Wait a bit before checking again
-        }
+        if (
+          queue.length > 0 &&
+          this.currentDownloads < this.maxConcurrentDownloads
+        )
+          setTimeout(process, 500);
       };
-
-      // Start processing
-      processQueue();
+      process();
     },
     backToChatList() {
-      // Close current modal
-      $('#modalChatMessages').modal('hide');
-
-      // Open Chat List modal after a short delay
+      this.closeModal();
       setTimeout(() => {
-        if (window.ChatListComponent && window.ChatListComponent.openModal) {
+        if (window.ChatListComponent?.openModal)
           window.ChatListComponent.openModal();
-        } else {
-          // Fallback: try to find and click the Chat List card
-          const chatListCards = document.querySelectorAll('.card .header');
-          for (let card of chatListCards) {
-            if (card.textContent.includes('Chat List')) {
-              card.click();
-              break;
-            }
-          }
-        }
       }, 200);
+    },
+    fileSizeText(fs) {
+      if (!fs) return "";
+      return `(${Math.round(fs / 1024)} KB)`;
     },
   },
   mounted() {
-    // Expose the openModal method globally for ChatList component to call
     window.ChatMessagesComponent = this;
-
-    // Handle retry media download events
-    this.handleRetryMediaDownload = (event) => {
-      const messageId = event.detail;
-      this.retryMediaDownload(messageId);
-    };
-
-    // Listen for retry media download events
-    document.addEventListener('retryMediaDownload', this.handleRetryMediaDownload);
+    this.handleRetryMediaDownload = (e) => this.retryMediaDownload(e.detail);
+    document.addEventListener(
+      "retryMediaDownload",
+      this.handleRetryMediaDownload,
+    );
   },
   beforeUnmount() {
-    // Clean up global reference
-    if (window.ChatMessagesComponent === this) {
+    if (window.ChatMessagesComponent === this)
       delete window.ChatMessagesComponent;
-    }
-
-    // Clean up event listeners
-    if (this.handleRetryMediaDownload) {
-      document.removeEventListener('retryMediaDownload', this.handleRetryMediaDownload);
-    }
+    if (this.handleRetryMediaDownload)
+      document.removeEventListener(
+        "retryMediaDownload",
+        this.handleRetryMediaDownload,
+      );
   },
   template: `
-    <div class="purple card" @click="openModal()" style="cursor: pointer">
-        <div class="content">
-            <a class="ui purple right ribbon label">Chat</a>
-            <div class="header">Chat Messages</div>
-            <div class="description">
-                View messages from specific chats with advanced filtering
-            </div>
-        </div>
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-chat)">Chat</span>
+      <div class="card-title">Chat Messages</div>
+      <div class="card-desc">View messages with advanced filtering</div>
     </div>
-    
-    <!--  Modal ChatMessages  -->
-    <div class="ui large modal" id="modalChatMessages">
-        <i class="close icon"></i>
-        <div class="header">
-            <i class="comment icon"></i>
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box large">
+          <div class="modal-header">
             Chat Messages
-        </div>
-        <div class="content">
-            <div class="ui form">
-                <div class="field">
-                    <label>Chat JID</label>
-                    <input type="text" 
-                           placeholder="Enter phone number or full JID (e.g. 1234567890 or group-id@g.us)" 
-                           v-model="jid">
-                </div>
-                
-                <div class="ui accordion">
-                    <div class="title">
-                        <i class="dropdown icon"></i>
-                        Advanced Filters (Optional)
-                    </div>
-                    <div class="content">
-                        <div class="fields">
-                            <div class="eight wide field">
-                                <label>Search Message Content</label>
-                                <input type="text" 
-                                       placeholder="Search in message text..." 
-                                       v-model="searchQuery">
-                            </div>
-                            <div class="four wide field">
-                                <label>Sender Filter</label>
-                                <select class="ui dropdown" v-model="isFromMe">
-                                    <option value="">All messages</option>
-                                    <option value="true">My messages</option>
-                                    <option value="false">Their messages</option>
-                                </select>
-                            </div>
-                            <div class="four wide field">
-                                <label>&nbsp;</label>
-                                <div class="ui checkbox">
-                                    <input type="checkbox" v-model="onlyMedia">
-                                    <label>Media only</label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="fields">
-                            <div class="eight wide field">
-                                <label>Start Date/Time</label>
-                                <input type="datetime-local" v-model="startTime">
-                            </div>
-                            <div class="eight wide field">
-                                <label>End Date/Time</label>
-                                <input type="datetime-local" v-model="endTime">
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Chat JID</label>
+              <input
+                type="text"
+                placeholder="Phone or full JID (e.g. 123... or group-id@g.us)"
+                v-model="jid"
+                class="form-input"
+              />
             </div>
-            
-            <div class="ui divider"></div>
-            
-            <div class="actions">
-                <button class="ui primary button" 
-                        :class="{'disabled': !isValidForm() || loading}"
-                        @click="loadMessages">
-                    <i class="search icon"></i>
-                    {{ loading ? 'Loading...' : 'Load Messages' }}
-                </button>
-                <button class="ui button" @click="handleReset">
-                    <i class="refresh icon"></i>
-                    Reset
-                </button>
-            </div>
-            
-            <div v-if="loading" class="ui active centered inline loader"></div>
-            
-            <div v-else-if="messages.length === 0 && totalMessages === 0" class="ui placeholder segment">
-                <div class="ui icon header">
-                    <i class="comment outline icon"></i>
-                    No messages loaded
+
+            <!-- Collapsible Filters -->
+            <div class="mb-4">
+              <button type="button" class="btn btn-sm btn-ghost" @click="showFilters = !showFilters">
+                {{ showFilters ? '' : '' }} Advanced Filters
+              </button>
+              <div v-if="showFilters" class="mt-3 border-2 border-gray-200 p-4 space-y-3">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div class="form-group" style="margin-bottom: 0">
+                    <label class="form-label">Search Content</label>
+                    <input
+                      type="text"
+                      placeholder="Search text..."
+                      v-model="searchQuery"
+                      class="form-input"
+                    />
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0">
+                    <label class="form-label">Sender</label>
+                    <select class="form-select" v-model="isFromMe">
+                      <option value="">All</option>
+                      <option value="true">My messages</option>
+                      <option value="false">Their messages</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0">
+                    <label class="form-label">&nbsp;</label>
+                    <label class="toggle-wrap">
+                      <span
+                        class="toggle-track"
+                        :class="{active: onlyMedia}"
+                        @click="onlyMedia = !onlyMedia"
+                      ></span>
+                      <span class="toggle-label">Media only</span>
+                    </label>
+                  </div>
                 </div>
-                <p>Enter a JID and click "Load Messages" to view chat history</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="form-group" style="margin-bottom: 0">
+                    <label class="form-label">Start Date/Time</label>
+                    <input type="datetime-local" v-model="startTime" class="form-input" />
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0">
+                    <label class="form-label">End Date/Time</label>
+                    <input type="datetime-local" v-model="endTime" class="form-input" />
+                  </div>
+                </div>
+              </div>
             </div>
-            
+
+            <div class="flex gap-2 mb-4">
+              <button
+                class="btn btn-primary"
+                :class="{'btn-loading': loading}"
+                :disabled="!isValidForm() || loading"
+                @click="loadMessages"
+              >
+                {{ loading ? 'Loading...' : 'Load Messages' }}
+              </button>
+              <button class="btn btn-ghost" @click="handleReset">Reset</button>
+            </div>
+
+            <div v-if="loading" class="loader-center"><div class="loader"></div></div>
+            <div v-else-if="messages.length === 0 && totalMessages === 0" class="msg-box info">
+              Enter a JID and click "Load Messages" to view chat history.
+            </div>
+
             <div v-else-if="messages.length > 0">
-                <div style="padding-top: 1em; padding-bottom: 1em;">
-                    <div class="ui info message">
-                        <div class="header">
-                            Chat Messages for {{ formattedJid }}
-                        </div>
-                        <p>Showing {{ messages.length }} of {{ totalMessages }} messages</p>
-                    </div>
+              <div class="msg-box info mb-4">
+                <div class="msg-title">Chat: {{ formattedJid }}</div>
+                <p class="text-sm">Showing {{ messages.length }} of {{ totalMessages }} messages</p>
+              </div>
+
+              <div class="space-y-2" style="max-height: 400px; overflow-y: auto; scrollbar-width: thin">
+                <div
+                  v-for="message in messages"
+                  :key="message.id"
+                  class="p-3 border-2 border-gray-200"
+                  :style="{ borderLeft: message.is_from_me ? '4px solid var(--primary)' : '4px solid #999', background: message.is_from_me ? '#f0f7ff' : 'transparent' }"
+                >
+                  <div class="flex justify-between items-start mb-1">
+                    <span
+                      class="text-xs font-bold px-2 py-0.5 border border-gray-900"
+                      :class="message.is_from_me ? 'bg-blue-100' : 'bg-gray-100'"
+                    >
+                      {{ formatSender(message) }}
+                    </span>
+                    <span class="text-xs font-bold px-2 py-0.5 border border-gray-900 bg-gray-50">
+                      {{ formatMessageType(message) }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-gray-500 mb-1">
+                    {{ formatTimestamp(message.timestamp) }}
+                    <span v-if="message.id" class="ml-2 text-gray-400">ID: {{ message.id }}</span>
+                  </div>
+                  <div class="text-sm">{{ getMessageContent(message) }}</div>
+
+                  <!-- Media Display -->
+                  <div v-if="message.media_type && message.url" class="mt-2">
+                    <template v-if="getMediaDisplay(message)">
+                      <div
+                        v-if="getMediaDisplay(message).type === 'loading'"
+                        class="text-xs text-gray-500"
+                      >
+                        <div
+                          class="loader"
+                          style="
+                            width: 16px;
+                            height: 16px;
+                            border-width: 2px;
+                            display: inline-block;
+                            vertical-align: middle;
+                          "
+                        ></div>
+                        Downloading...
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'error'" class="msg-box error">
+                        <span class="text-xs">Failed to download</span>
+                        <button
+                          class="btn btn-sm btn-ghost ml-2"
+                          @click="retryMediaDownload(message.id)"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'image'">
+                        <img
+                          :src="getMediaDisplay(message).filePath"
+                          :alt="getMediaDisplay(message).filename"
+                          style="max-width: 300px; max-height: 300px; border: 2px solid #222"
+                          @error="$event.target.style.display='none'"
+                        />
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'video'">
+                        <video
+                          controls
+                          style="max-width: 300px; max-height: 300px; border: 2px solid #222"
+                          preload="metadata"
+                        >
+                          <source :src="getMediaDisplay(message).filePath" />
+                        </video>
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'audio'">
+                        <audio controls style="width: 100%; max-width: 300px">
+                          <source :src="getMediaDisplay(message).filePath" />
+                        </audio>
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'sticker'">
+                        <img
+                          :src="getMediaDisplay(message).filePath"
+                          alt="Sticker"
+                          style="max-width: 150px; max-height: 150px; border: 2px solid #222"
+                          @error="$event.target.style.display='none'"
+                        />
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'document'">
+                        <a
+                          :href="getMediaDisplay(message).filePath"
+                          :download="getMediaDisplay(message).filename"
+                          class="btn btn-sm btn-ghost"
+                        >
+                          {{ getMediaDisplay(message).filename }} {{ fileSizeText(getMediaDisplay(message).fileSize) }}
+                        </a>
+                      </div>
+                      <div v-else-if="getMediaDisplay(message).type === 'available'">
+                        <span class="text-xs font-bold px-2 py-1 border-2 border-gray-900 bg-blue-100">
+                          {{ message.media_type.toUpperCase() }} Available
+                        </span>
+                      </div>
+                      <div v-else>
+                        <span class="text-xs">Unknown media: {{ getMediaDisplay(message).type }}</span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
-                
-                <div class="ui divided items" style="max-height: 400px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin;">
-                    <div v-for="message in messages" :key="message.id" 
-                         class="item" 
-                         :style="getMessageStyle(message)">
-                        <div class="content">
-                            <div class="header">
-                                <div class="ui horizontal label" 
-                                     :class="message.is_from_me ? 'blue' : 'grey'">
-                                    {{ formatSender(message) }}
-                                </div>
-                                <div class="ui right floated horizontal label">
-                                    {{ formatMessageType(message) }}
-                                </div>
-                            </div>
-                            <div class="meta">
-                                <span>{{ formatTimestamp(message.timestamp) }}</span>
-                                <span v-if="message.id" class="right floated">
-                                    ID: {{ message.id }}
-                                </span>
-                            </div>
-                            <div class="description">
-                                <p>{{ getMessageContent(message) }}</p>
-                                <div v-if="message.media_type && message.url" class="media-container" style="margin-top: 0.5em;">
-                                    <div v-if="getMediaDisplay(message)" v-html="getMediaDisplay(message).content"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Pagination -->
-                <div class="ui pagination menu" v-if="totalPages > 1">
-                    <a class="icon item" @click="prevPage" :class="{ disabled: currentPage === 1 }">
-                        <i class="left chevron icon"></i>
-                    </a>
-                    <div class="item">
-                        Page {{ currentPage }} of {{ totalPages }}
-                    </div>
-                    <a class="icon item" @click="nextPage" :class="{ disabled: currentPage === totalPages }">
-                        <i class="right chevron icon"></i>
-                    </a>
-                </div>
+              </div>
+
+              <!-- Pagination -->
+              <div v-if="totalPages > 1" class="flex items-center justify-center gap-4 mt-4">
+                <button class="btn btn-sm btn-ghost" @click="prevPage" :disabled="currentPage === 1">
+                  Prev
+                </button>
+                <span class="text-sm font-bold">Page {{ currentPage }} / {{ totalPages }}</span>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  @click="nextPage"
+                  :disabled="currentPage === totalPages"
+                >
+                  Next
+                </button>
+              </div>
             </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" @click="backToChatList">Back to Chat List</button>
+            <button class="btn btn-ghost" @click="closeModal">Close</button>
+          </div>
         </div>
-        <div class="actions">
-            <button class="ui button" @click="backToChatList">
-                <i class="arrow left icon"></i>
-                Back to Chat List
-            </button>
-            <div class="ui approve button">Close</div>
-        </div>
-    </div>
-    `,
+      </div>
+    </teleport>
+  `,
 };

@@ -1,127 +1,133 @@
 import FormRecipient from "./generic/FormRecipient.js";
 
 export default {
-    name: 'AccountAvatar',
-    components: {
-        FormRecipient
+  name: "AccountAvatar",
+  components: { FormRecipient },
+  data() {
+    return {
+      type: window.TYPEUSER,
+      phone: "",
+      image: null,
+      is_preview: false,
+      is_community: false,
+      loading: false,
+      showModal: false,
+    };
+  },
+  computed: {
+    phone_id() {
+      return this.phone + this.type;
     },
-    data() {
-        return {
-            type: window.TYPEUSER,
-            phone: '',
-            image: null,
-            loading: false,
-            is_preview: false,
-            is_community: false,
-        }
+    isGroupType() {
+      return this.type === window.TYPEGROUP;
     },
-    computed: {
-        phone_id() {
-            return this.phone + this.type;
-        },
-        isGroupType() {
-            return this.type === window.TYPEGROUP;
-        }
+  },
+  watch: {
+    // Reset is_community when switching to user type (only valid for groups)
+    type(newType) {
+      if (newType !== window.TYPEGROUP) {
+        this.is_community = false;
+      }
     },
-    watch: {
-        type(newType) {
-            // Reset is_community when switching to user type (only valid for groups)
-            if (newType !== window.TYPEGROUP) {
-                this.is_community = false;
-            }
-        }
+  },
+  methods: {
+    openModal() {
+      this.handleReset();
+      this.showModal = true;
     },
-    methods: {
-        async openModal() {
-            this.handleReset();
-            $('#modalUserAvatar').modal('show');
-        },
-        isValidForm() {
-            if (!this.phone.trim()) {
-                return false;
-            }
-
-            return true;
-        },
-        async handleSubmit() {
-            if (!this.isValidForm() || this.loading) {
-                return;
-            }
-
-            try {
-                await this.submitApi();
-                showSuccessInfo("Avatar fetched")
-            } catch (err) {
-                showErrorInfo(err)
-            }
-        },
-        async submitApi() {
-            this.loading = true;
-            try {
-                let response = await window.http.get(`/user/avatar?phone=${this.phone_id}&is_preview=${this.is_preview}&is_community=${this.is_community}`)
-                this.image = response.data.results.url;
-            } catch (error) {
-                if (error.response) {
-                    throw new Error(error.response.data.message);
-                }
-                throw new Error(error.message);
-            } finally {
-                this.loading = false;
-            }
-        },
-        handleReset() {
-            this.phone = '';
-            this.image = null;
-            this.type = window.TYPEUSER;
-        }
+    closeModal() {
+      this.showModal = false;
     },
-    template: `
-    <div class="olive card" @click="openModal" style="cursor: pointer;">
-        <div class="content">
-        <a class="ui olive right ribbon label">Account</a>
-            <div class="header">Avatar</div>
-            <div class="description">
-                You can search someone avatar by phone
-            </div>
-        </div>
+    isValidForm() {
+      return this.phone.trim().length > 0;
+    },
+    async handleSubmit() {
+      if (!this.isValidForm() || this.loading) return;
+      try {
+        await this.submitApi();
+        showSuccessInfo("Avatar fetched");
+      } catch (err) {
+        showErrorInfo(err);
+      }
+    },
+    async submitApi() {
+      this.loading = true;
+      try {
+        let response = await window.http.get(
+          `/user/avatar?phone=${this.phone_id}&is_preview=${this.is_preview}&is_community=${this.is_community}`,
+        );
+        this.image = response.data.results.url;
+      } catch (error) {
+        if (error.response) throw new Error(error.response.data.message);
+        throw new Error(error.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+    handleReset() {
+      this.phone = "";
+      this.image = null;
+      this.type = window.TYPEUSER;
+      this.is_community = false;
+    },
+  },
+  template: `
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-account)">Account</span>
+      <div class="card-title">Get Avatar</div>
+      <div class="card-desc">Get user or group avatar</div>
     </div>
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box">
+          <div class="modal-header">
+            Get Avatar
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <form @submit.prevent="handleSubmit">
+              <FormRecipient v-model:type="type" v-model:phone="phone" />
 
-    <!--  Modal UserAvatar  -->
-    <div class="ui small modal" id="modalUserAvatar">
-        <i class="close icon"></i>
-        <div class="header">
-            Search User Avatar
-        </div>
-        <div class="content">
-            <form class="ui form">
-                <FormRecipient v-model:type="type" v-model:phone="phone"/>
+              <div class="form-group">
+                <label class="toggle-wrap">
+                  <span
+                    class="toggle-track"
+                    :class="{active: is_preview}"
+                    @click="is_preview = !is_preview"
+                  ></span>
+                  <span class="toggle-label">Preview (low quality)</span>
+                </label>
+              </div>
 
-                <div class="field">
-                    <label>Preview</label>
-                    <div class="ui toggle checkbox">
-                        <input type="checkbox" aria-label="compress" v-model="is_preview">
-                        <label>Check for small size image</label>
-                    </div>
-                </div>
+              <div class="form-group" v-if="isGroupType">
+                <label class="toggle-wrap">
+                  <span
+                    class="toggle-track"
+                    :class="{active: is_community}"
+                    @click="is_community = !is_community"
+                  ></span>
+                  <span class="toggle-label">Community group</span>
+                </label>
+              </div>
 
-                <div class="field" v-if="isGroupType">
-                    <label>Community</label>
-                    <div class="ui toggle checkbox">
-                        <input type="checkbox" aria-label="compress" v-model="is_community">
-                        <label>Check if it's a community group</label>
-                    </div>
-                </div>
-
-                <button type="button" class="ui primary button" :class="{'loading': loading, 'disabled': !this.isValidForm() || this.loading}"
-                        @click.prevent="handleSubmit">
-                    Search
-                </button>
+              <div v-if="image" class="form-group">
+                <label class="form-label">Result</label>
+                <img :src="image" class="preview-image" alt="profile picture" />
+              </div>
             </form>
-
-            <div v-if="image != null" class="center">
-                <img :src="image" alt="profile picture" style="padding-top: 10px; max-height: 200px">
-            </div>
+          </div>
+          <div class="modal-footer">
+            <button
+              class="btn btn-primary"
+              :class="{'btn-loading': loading}"
+              :disabled="!isValidForm() || loading"
+              @click.prevent="handleSubmit"
+            >
+              Get Avatar
+            </button>
+          </div>
         </div>
-    </div>
-    `
-}
+      </div>
+    </teleport>
+  `,
+};

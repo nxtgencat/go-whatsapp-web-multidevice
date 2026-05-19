@@ -1,164 +1,181 @@
 import FormRecipient from "./generic/FormRecipient.js";
 
 export default {
-    name: 'SendMessage',
-    components: {
-        FormRecipient
+  name: "SendMessage",
+  components: {
+    FormRecipient,
+  },
+  data() {
+    return {
+      type: window.TYPEUSER,
+      phone: "",
+      text: "",
+      reply_message_id: "",
+      is_forwarded: false,
+      mention_everyone: false,
+      duration: 0,
+      loading: false,
+      showModal: false,
+    };
+  },
+  computed: {
+    phone_id() {
+      return this.phone + this.type;
     },
-    data() {
-        return {
-            type: window.TYPEUSER,
-            phone: '',
-            text: '',
-            reply_message_id: '',
-            is_forwarded: false,
-            mention_everyone: false,
-            duration: 0,
-            loading: false,
+  },
+  methods: {
+    openModal() {
+      this.showModal = true;
+    },
+    closeModal() {
+      this.showModal = false;
+    },
+    isShowReplyId() {
+      return this.type !== window.TYPESTATUS;
+    },
+    isGroup() {
+      return this.type === window.TYPEGROUP;
+    },
+    isValidForm() {
+      const isPhoneValid =
+        this.type === window.TYPESTATUS || this.phone.trim().length > 0;
+      const isMessageValid =
+        this.text.trim().length > 0 && this.text.length <= 4096;
+      return isPhoneValid && isMessageValid;
+    },
+    async handleSubmit() {
+      if (!this.isValidForm() || this.loading) {
+        return;
+      }
+      try {
+        const response = await this.submitApi();
+        showSuccessInfo(response);
+        this.closeModal();
+      } catch (err) {
+        showErrorInfo(err);
+      }
+    },
+    async submitApi() {
+      this.loading = true;
+      try {
+        const payload = {
+          phone: this.phone_id,
+          message: this.text.trim(),
+          is_forwarded: this.is_forwarded,
+        };
+        if (this.reply_message_id !== "") {
+          payload.reply_message_id = this.reply_message_id;
         }
+        if (this.duration && this.duration > 0) {
+          payload.duration = this.duration;
+        }
+        if (this.mention_everyone && this.type === window.TYPEGROUP) {
+          payload.mentions = ["@everyone"];
+        }
+
+        const response = await window.http.post("/send/message", payload);
+        this.handleReset();
+        return response.data.message;
+      } catch (error) {
+        if (error.response?.data?.message) {
+          throw new Error(error.response.data.message);
+        }
+        throw error;
+      } finally {
+        this.loading = false;
+      }
     },
-    computed: {
-        phone_id() {
-            return this.phone + this.type;
-        },
+    handleReset() {
+      this.phone = "";
+      this.text = "";
+      this.reply_message_id = "";
+      this.is_forwarded = false;
+      this.mention_everyone = false;
+      this.duration = 0;
     },
-    methods: {
-        openModal() {
-            $('#modalSendMessage').modal({
-                onApprove: function () {
-                    return false;
-                }
-            }).modal('show');
-        },
-        isShowReplyId() {
-            return this.type !== window.TYPESTATUS;
-        },
-        isGroup() {
-            return this.type === window.TYPEGROUP;
-        },
-        isValidForm() {
-            // Validate phone number is not empty except for status type
-            const isPhoneValid = this.type === window.TYPESTATUS || this.phone.trim().length > 0;
-            
-            // Validate message is not empty and has reasonable length
-            const isMessageValid = this.text.trim().length > 0 && this.text.length <= 4096;
-
-            return isPhoneValid && isMessageValid
-        },
-        async handleSubmit() {
-            // Add validation check here to prevent submission when form is invalid
-            if (!this.isValidForm() || this.loading) {
-                return;
-            }
-            try {
-                const response = await this.submitApi();
-                showSuccessInfo(response);
-                $('#modalSendMessage').modal('hide');
-            } catch (err) {
-                showErrorInfo(err);
-            }
-        },
-        async submitApi() {
-            this.loading = true;
-            try {
-                const payload = {
-                    phone: this.phone_id,
-                    message: this.text.trim(),
-                    is_forwarded: this.is_forwarded
-                };
-                if (this.reply_message_id !== '') {
-                    payload.reply_message_id = this.reply_message_id;
-                }
-
-                if (this.duration && this.duration > 0) {
-                    payload.duration = this.duration;
-                }
-
-                // Add mentions if mention_everyone is checked (only for groups)
-                if (this.mention_everyone && this.type === window.TYPEGROUP) {
-                    payload.mentions = ["@everyone"];
-                }
-
-                const response = await window.http.post('/send/message', payload);
-                this.handleReset();
-                return response.data.message;
-            } catch (error) {
-                if (error.response?.data?.message) {
-                    throw new Error(error.response.data.message);
-                }
-                throw error;
-            } finally {
-                this.loading = false;
-            }
-        },
-        handleReset() {
-            this.phone = '';
-            this.text = '';
-            this.reply_message_id = '';
-            this.is_forwarded = false;
-            this.mention_everyone = false;
-            this.duration = 0;
-        },
-    },
-    template: `
-    <div class="blue card" @click="openModal()" style="cursor: pointer">
-        <div class="content">
-            <a class="ui blue right ribbon label">Send</a>
-            <div class="header">Send Message</div>
-            <div class="description">
-                Send any message to user or group
-            </div>
-        </div>
+  },
+  template: `
+    <div class="action-card" @click="openModal">
+      <span class="card-badge" style="background: var(--cat-send)">Send</span>
+      <div class="card-title">Send Message</div>
+      <div class="card-desc">Send any message to user or group</div>
     </div>
-    
-    <!--  Modal SendMessage  -->
-    <div class="ui small modal" id="modalSendMessage">
-        <i class="close icon"></i>
-        <div class="header">
+
+    <teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-box">
+          <div class="modal-header">
             Send Message
-        </div>
-        <div class="content">
-            <form class="ui form">
-                <FormRecipient v-model:type="type" v-model:phone="phone" :show-status="true"/>
-                <div class="field" v-if="isShowReplyId()">
-                    <label>Reply Message ID</label>
-                    <input v-model="reply_message_id" type="text"
-                           placeholder="Optional: 57D29F74B7FC62F57D8AC2C840279B5B/3EB0288F008D32FCD0A424"
-                           aria-label="reply_message_id">
-                </div>
-                <div class="field">
-                    <label>Message</label>
-                    <textarea v-model="text" placeholder="Hello this is message text"
-                              aria-label="message"></textarea>
-                </div>
-                <div class="field" v-if="isShowReplyId()">
-                    <label>Is Forwarded</label>
-                    <div class="ui toggle checkbox">
-                        <input type="checkbox" aria-label="is forwarded" v-model="is_forwarded">
-                        <label>Mark message as forwarded</label>
-                    </div>
-                </div>
-                <div class="field" v-if="isGroup()">
-                    <label>Mention Everyone</label>
-                    <div class="ui toggle checkbox">
-                        <input type="checkbox" aria-label="mention everyone" v-model="mention_everyone">
-                        <label>Mention all group participants (@everyone)</label>
-                    </div>
-                </div>
-                <div class="field">
-                    <label>Disappearing Duration (seconds)</label>
-                    <input v-model.number="duration" type="number" min="0" placeholder="0 (no expiry)" aria-label="duration"/>
-                </div>
+            <button class="modal-close" @click="closeModal">Close</button>
+          </div>
+          <div class="modal-body">
+            <form @submit.prevent="handleSubmit">
+              <FormRecipient v-model:type="type" v-model:phone="phone" :show-status="true" />
+
+              <div class="form-group" v-if="isShowReplyId()">
+                <label class="form-label">Reply Message ID</label>
+                <input
+                  v-model="reply_message_id"
+                  type="text"
+                  class="form-input"
+                  placeholder="Optional: message ID to reply to"
+                  aria-label="reply_message_id"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Message</label>
+                <textarea
+                  v-model="text"
+                  class="form-textarea"
+                  placeholder="Hello this is message text"
+                  aria-label="message"
+                ></textarea>
+              </div>
+              <div class="form-group" v-if="isShowReplyId()">
+                <label class="toggle-wrap">
+                  <span
+                    class="toggle-track"
+                    :class="{active: is_forwarded}"
+                    @click="is_forwarded = !is_forwarded"
+                  ></span>
+                  <span class="toggle-label">Mark message as forwarded</span>
+                </label>
+              </div>
+              <div class="form-group" v-if="isGroup()">
+                <label class="toggle-wrap">
+                  <span
+                    class="toggle-track"
+                    :class="{active: mention_everyone}"
+                    @click="mention_everyone = !mention_everyone"
+                  ></span>
+                  <span class="toggle-label">Mention all group participants (@everyone)</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Disappearing Duration (seconds)</label>
+                <input
+                  v-model.number="duration"
+                  type="number"
+                  min="0"
+                  class="form-input"
+                  placeholder="0 (no expiry)"
+                  aria-label="duration"
+                />
+              </div>
             </form>
-        </div>
-        <div class="actions">
-            <button class="ui approve positive right labeled icon button" 
-                 :class="{'disabled': !isValidForm() || loading}"
-                 @click.prevent="handleSubmit">
-                Send
-                <i class="send icon"></i>
+          </div>
+          <div class="modal-footer">
+            <button
+              class="btn btn-primary"
+              :class="{'btn-loading': loading}"
+              :disabled="!isValidForm() || loading"
+              @click.prevent="handleSubmit"
+            >
+              Send
             </button>
+          </div>
         </div>
-    </div>
-    `
-}
+      </div>
+    </teleport>
+  `,
+};
