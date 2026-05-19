@@ -82,7 +82,7 @@ export default {
 
       try {
         const response = await window.http.get(
-          `/group/participant-requests?group_id=${group_id}`,
+          `/group/participant-requests?group_id=${encodeURIComponent(group_id)}`,
         );
         this.requestedMembers = response.data.results || [];
       } catch (error) {

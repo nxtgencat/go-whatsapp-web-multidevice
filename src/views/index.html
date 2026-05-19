@@ -187,21 +187,40 @@
       window.TYPESTATUS = "status@broadcast";
 
       // -- Toast System (replaces jQuery toasts) -----------------
+      const ALLOWED_TOAST_TYPES = new Set(['success', 'error', 'info', 'warning']);
       window.showToast = function(type, title, message) {
       const container = document.getElementById('toast-container');
       if (!container) return;
 
+      const safeType = ALLOWED_TOAST_TYPES.has(type) ? type : 'info';
       const toast = document.createElement('div');
-      toast.className = `toast ${type}`;
+      toast.className = `toast ${safeType}`;
 
-      toast.innerHTML = `
-      <div class="toast-content">
-      <div class="toast-title">${title}</div>
-      <div class="toast-message">${String(message).replace(/^Error:\s*/i, '')}</div>
-      </div>
-      <button class="toast-close" onclick="this.closest('.toast').remove()">x</button>
-      <div class="toast-progress"></div>
-      `;
+      const content = document.createElement('div');
+      content.className = 'toast-content';
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'toast-title';
+      titleEl.textContent = title;
+
+      const messageEl = document.createElement('div');
+      messageEl.className = 'toast-message';
+      messageEl.textContent = String(message).replace(/^Error:\s*/i, '');
+
+      content.appendChild(titleEl);
+      content.appendChild(messageEl);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'toast-close';
+      closeBtn.textContent = 'x';
+      closeBtn.addEventListener('click', () => toast.remove());
+
+      const progress = document.createElement('div');
+      progress.className = 'toast-progress';
+
+      toast.appendChild(content);
+      toast.appendChild(closeBtn);
+      toast.appendChild(progress);
 
       container.appendChild(toast);
       setTimeout(() => {
@@ -486,7 +505,13 @@
             };
 
             this.app_ws.onmessage = (evt) => {
-              const message = JSON.parse(evt.data);
+              let message;
+              try {
+                message = JSON.parse(evt.data);
+              } catch (e) {
+                console.error('Invalid WebSocket message:', e);
+                return;
+              }
               switch (message.code) {
                 case "LOGIN_SUCCESS":
                   showSuccessInfo(message.message);

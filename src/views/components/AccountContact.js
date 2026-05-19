@@ -31,6 +31,11 @@ export default {
     getPhoneNumber(jid) {
       return jid.split("@")[0];
     },
+    csvSafe(val) {
+      const s = String(val);
+      if (/^[=+\-@\t\r]/.test(s)) return "'" + s;
+      return s;
+    },
     exportToCSV() {
       if (!this.contacts || !this.contacts.length) {
         showErrorInfo("No contacts to export");
@@ -38,8 +43,8 @@ export default {
       }
       let csvContent = "Phone Number,Name\n";
       this.contacts.forEach((c) => {
-        const phone = this.getPhoneNumber(c.jid);
-        const name = c.name ? c.name.replace(/"/g, '""') : "";
+        const phone = this.csvSafe(this.getPhoneNumber(c.jid));
+        const name = c.name ? this.csvSafe(c.name.replace(/"/g, '""')) : "";
         csvContent += `${phone},"${name}"\n`;
       });
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -51,6 +56,7 @@ export default {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
       showSuccessInfo("Contacts exported to CSV");
     },
   },
